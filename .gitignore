@@ -23,3 +23,7 @@ env/
 # OS / editor
 .DS_Store
 *.swp
+
+# Runtime secrets (never commit; keep .env.example as the template)
+.env
+deploy/.env
