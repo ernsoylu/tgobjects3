@@ -64,8 +64,16 @@ POOL_TIMEOUT_SECONDS = 30.0
 DB_CONNECT_MAX_ATTEMPTS = 10
 DB_CONNECT_RETRY_INTERVAL_SECONDS = 3.0
 
-# Repository-root ``alembic.ini``. ``session.py`` lives at
-# ``gateway/app/db/session.py``; the config file is three parents up.
+# Alembic lives in two shapes depending on how the gateway is run:
+#   * from a source checkout, the repo-root ``alembic.ini`` (three parents up)
+#     carries the ``[alembic]`` settings and points at the migrations dir; and
+#   * from an installed wheel / container image there is no repo-root ini, so
+#     the migrations package data shipped alongside this module is the only
+#     thing present.
+# ``session.py`` lives at ``gateway/app/db/session.py``; the migrations dir is a
+# sibling (``gateway/app/db/migrations``) in both shapes, so resolve it relative
+# to this file and treat the repo-root ini as an optional overlay.
+_MIGRATIONS_DIR = Path(__file__).resolve().parent / "migrations"
 _ALEMBIC_INI = Path(__file__).resolve().parents[3] / "alembic.ini"
 
 # A staging crash-recovery scan: given an open AsyncSession, quarantine orphaned
@@ -256,13 +264,22 @@ async def wait_for_database(
 
 
 def _make_alembic_config(db_url: str) -> Config:
-    """Build an Alembic :class:`Config` pointed at the repo's ``alembic.ini``.
+    """Build an Alembic :class:`Config` that works from source *or* a wheel.
+
+    ``script_location`` is set to the migrations directory resolved relative to
+    this module (:data:`_MIGRATIONS_DIR`), so migrations run correctly from an
+    installed package/container image where no repo-root ``alembic.ini`` exists
+    (Requirement 1.4). When the repo-root ini *is* present (a source checkout)
+    it is used as the base so its logging configuration is preserved; its
+    relative ``script_location`` is then overridden with the absolute package
+    path so the result is independent of the process working directory.
 
     The migration env reads ``DATABASE_URL`` from the environment, but we also
     set ``sqlalchemy.url`` on the config so a caller-supplied URL is honoured
     without mutating process environment variables.
     """
-    config = Config(str(_ALEMBIC_INI))
+    config = Config(str(_ALEMBIC_INI)) if _ALEMBIC_INI.is_file() else Config()
+    config.set_main_option("script_location", str(_MIGRATIONS_DIR))
     config.set_main_option("sqlalchemy.url", _normalise_asyncpg_url(db_url))
     return config
 

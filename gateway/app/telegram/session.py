@@ -165,6 +165,23 @@ class SessionManager:
         if self._monitor_task is None or self._monitor_task.done():
             self._monitor_task = asyncio.create_task(self._monitor_loop())
 
+    async def start_in_background(self) -> None:
+        """Begin connecting without blocking the caller (deployment startup).
+
+        Unlike :meth:`start`, this never waits for the first connection to
+        succeed. It launches the connectivity monitor and kicks off the
+        reconnection loop, leaving the session in ``RECONNECTING`` until a
+        connect succeeds. This is what the gateway uses at startup so the
+        process binds its HTTP ports and serves the setup wizard even when
+        Telegram is not configured yet; until the session reaches ``CONNECTED``
+        every guarded call raises :class:`TelegramUnavailableError` (503) per
+        requirement 3.3, and the loop self-heals once valid credentials exist.
+        """
+        self._closing = False
+        if self._monitor_task is None or self._monitor_task.done():
+            self._monitor_task = asyncio.create_task(self._monitor_loop())
+        await self._trigger_reconnect()
+
     async def stop(self) -> None:
         """Stop all background tasks and disconnect the underlying client."""
         self._closing = True

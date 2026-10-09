@@ -412,6 +412,15 @@ class GatewayContext:
     _tasks: list[asyncio.Task[None]] = field(default_factory=list)
     #: Guards the lifespan so only the first app to enter runs startup/shutdown.
     _started: bool = False
+    #: Serialises the once-only startup across the two apps' lifespans. Both the
+    #: S3 and admin apps start together, so the ``_started`` check-and-set must
+    #: be atomic — otherwise both lifespans run the connect/migrate sequence
+    #: concurrently and the two ``alembic upgrade head`` calls deadlock on the
+    #: migration lock. The lock makes the check-and-set atomic; the event lets
+    #: the second (non-owning) lifespan wait until startup has completed before
+    #: its app begins serving.
+    _startup_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    _ready: asyncio.Event = field(default_factory=asyncio.Event)
 
 
 # ---------------------------------------------------------------------------
@@ -797,14 +806,29 @@ def _wire_health_endpoints(app: FastAPI, context: GatewayContext) -> None:
 
 
 def _wire_metrics_endpoint(app: FastAPI, context: GatewayContext) -> None:
-    """Mount ``/metrics`` if the metrics module is available (task 33.2)."""
-    _wire_optional_router(
-        app,
-        context,
-        module_name="gateway.app.admin.metrics",
-        factory_name="create_metrics_router",
-        label="metrics endpoint",
-    )
+    """Mount ``/metrics`` if the metrics module is available (task 33.2).
+
+    Unlike the ``context=``-shaped admin router, ``create_metrics_router`` takes
+    a :class:`~gateway.app.admin.metrics.MetricsRegistry` positional argument:
+    one process-local registry is created here and shared by the subsystems that
+    update metrics, and the ``/metrics`` scrape renders it (requirement 18.1).
+    Imported defensively so a future reshape of that module cannot stop the
+    admin app from binding its port.
+    """
+    try:
+        from gateway.app.admin import metrics
+    except ImportError:
+        logger.info("metrics endpoint not available yet; skipping")
+        return
+
+    create_metrics_router = getattr(metrics, "create_metrics_router", None)
+    registry_cls = getattr(metrics, "MetricsRegistry", None)
+    if create_metrics_router is None or registry_cls is None:
+        logger.info("metrics module present but missing its factory/registry")
+        return
+
+    app.state.metrics_registry = registry_cls()
+    app.include_router(create_metrics_router(app.state.metrics_registry))
 
 
 # ---------------------------------------------------------------------------
@@ -825,18 +849,34 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """
     context: GatewayContext = app.state.context
 
-    if not context._started:
-        await _startup(context)
-        context._started = True
-        owns_lifecycle = True
+    # Atomically decide who owns the lifecycle. Both apps' lifespans run
+    # concurrently, so the check-and-set is serialised under a lock: the first
+    # in runs startup and signals readiness; the second finds startup already
+    # owned, waits for the ready event, and serves against the same graph.
+    async with context._startup_lock:
+        owns_lifecycle = not context._started
+        if owns_lifecycle:
+            context._started = True
+
+    if owns_lifecycle:
+        try:
+            await _startup(context)
+        except BaseException:
+            # Let the other lifespan unblock (it will see no readiness and the
+            # process is exiting anyway) and reset so a retry is possible.
+            context._started = False
+            context._ready.set()
+            raise
+        context._ready.set()
     else:
-        owns_lifecycle = False
+        await context._ready.wait()
 
     try:
         yield
     finally:
         if owns_lifecycle:
             await _shutdown(context)
+            context._ready.clear()
             context._started = False
 
 
@@ -863,9 +903,14 @@ async def _startup(context: GatewayContext) -> None:
     await db_session.run_migrations(settings.DATABASE_URL)
     await _run_staging_recovery(context)
 
-    # Connect the single Telegram session (Requirement 3.1). A disconnected
-    # session (no credentials yet) leaves callers to receive 503 per 3.3.
-    await context.telegram.start()
+    # Begin connecting the single Telegram session without blocking startup
+    # (Requirement 3.1). A deployment that has not been through the setup wizard
+    # has no Telegram credentials yet, so a blocking connect would never return
+    # and the gateway would never bind its ports. start_in_background launches
+    # the monitor + reconnect loop and returns immediately; until the session
+    # reaches CONNECTED, guarded calls raise TelegramUnavailableError (503) per
+    # Requirement 3.3, and the loop self-heals once credentials are configured.
+    await context.telegram.start_in_background()
 
     _start_background_tasks(context)
     logger.info(

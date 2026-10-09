@@ -53,6 +53,20 @@ packages = [
     "cli",
 ]
 
+# Ship the Alembic migration tree as package data on the ``gateway.app.db``
+# package so the gateway can self-migrate from an installed wheel / container
+# image (Requirement 1.4), where no repo-root ``alembic.ini`` or source tree is
+# present. These files are loaded by Alembic by path (not imported), so they are
+# data rather than modules: env.py, the script template, the README, and every
+# revision under versions/.
+[tool.setuptools.package-data]
+"gateway.app.db" = [
+    "migrations/env.py",
+    "migrations/script.py.mako",
+    "migrations/README",
+    "migrations/versions/*.py",
+]
+
 # ---------------------------------------------------------------------------
 # Project-specific defaults.
 #
