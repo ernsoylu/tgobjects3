@@ -1,0 +1,49 @@
+# Keep the Docker build context minimal and reproducible.
+# The deploy/Dockerfile only COPYs pyproject.toml, README.md, gateway/ and cli/,
+# but excluding the rest keeps the context small and avoids leaking local state.
+
+# Version control
+.git
+.gitignore
+
+# Python caches / build artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.eggs/
+
+# Virtualenvs
+.venv/
+venv/
+env/
+
+# Tooling caches
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Tests are not needed in the image
+tests/
+
+# Stub / non-service trees
+console/
+deploy/
+
+# Specs and docs
+.kiro/
+*.md
+!README.md
+
+# Local env files — never bake secrets into the build context
+.env
+.env.*
+!.env.example
+
+# Editor / OS cruft
+.vscode/
+.idea/
+.DS_Store

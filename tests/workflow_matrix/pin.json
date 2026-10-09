@@ -1,0 +1,8 @@
+{
+  "_comment": "Pinned S3 client versions for the workflow matrix tests (Requirement 20). The matrix suite (tasks 30.2-30.6) runs each client at the version recorded here. Update deliberately alongside the corresponding matrix tests.",
+  "aws_cli_v2": "2.17.0",
+  "boto3": "1.34.100",
+  "rclone": "1.68.0",
+  "restic": "0.17.0",
+  "minio_mc": "RELEASE.2024-08-13T05-33-17Z"
+}

@@ -1,0 +1,118 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tgobjects3"
+version = "0.1.0"
+description = "S3-compatible object storage gateway backed by Telegram channels"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "Proprietary" }
+dependencies = [
+    "fastapi==0.115.6",
+    "uvicorn[standard]==0.34.0",
+    "uvloop==0.21.0",
+    "pydantic>=2,<3",
+    "pydantic-settings==2.7.1",
+    "telethon==1.38.1",
+    "cryptg==0.5.0.post0",
+    "cryptography==44.0.0",
+    "sqlalchemy[asyncio]>=2,<3",
+    "asyncpg==0.30.0",
+    "alembic==1.14.0",
+    "awscrt==0.23.4",
+    "msgpack==1.1.0",
+]
+
+[project.optional-dependencies]
+test = [
+    "hypothesis==6.123.2",
+    "pytest==8.3.4",
+    "pytest-asyncio==0.25.1",
+    "testcontainers[postgres]==4.9.0",
+]
+dev = [
+    "ruff==0.8.6",
+    "mypy==1.14.1",
+]
+
+[tool.setuptools]
+packages = [
+    "gateway",
+    "gateway.app",
+    "gateway.app.format",
+    "gateway.app.s3",
+    "gateway.app.s3.operations",
+    "gateway.app.admin",
+    "gateway.app.storage",
+    "gateway.app.telegram",
+    "gateway.app.cache",
+    "gateway.app.jobs",
+    "gateway.app.db",
+    "cli",
+]
+
+# ---------------------------------------------------------------------------
+# Project-specific defaults.
+#
+# Placeholder for M0 benchmark-derived defaults. Task 3 ("Checkpoint — Record
+# M0 results") will finalise these after the benchmark harness runs. The values
+# below mirror the design document defaults and act as safe fallbacks until
+# then.
+# ---------------------------------------------------------------------------
+[tool.tgobjects3]
+CHUNK_RECORDS = 512
+UPLOAD_CONCURRENCY = 2
+READ_AHEAD = 4
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["gateway", "cli", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "F",    # pyflakes
+    "I",    # isort
+    "W",    # pycodestyle warnings
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "C4",   # flake8-comprehensions
+    "SIM",  # flake8-simplify
+]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+disallow_untyped_defs = true
+disallow_any_generics = true
+no_implicit_reexport = true
+show_error_codes = true
+files = ["gateway", "cli"]
+
+[[tool.mypy.overrides]]
+module = [
+    "telethon.*",
+    "cryptg.*",
+    "awscrt.*",
+    "testcontainers.*",
+    "msgpack.*",
+    "boto3.*",
+    "botocore.*",
+    "mypy_boto3_s3.*",
+]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+asyncio_mode = "auto"
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-ra --strict-markers"

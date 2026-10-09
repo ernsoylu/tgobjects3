@@ -1,0 +1,10 @@
+Alembic migrations for the tgobjects3 PostgreSQL index.
+
+The database URL is read from the DATABASE_URL environment variable by env.py
+(normalised to the postgresql+asyncpg driver); it is never stored in
+alembic.ini. Run migrations with the repository root as the working directory:
+
+    DATABASE_URL=postgresql://user:pass@host:5432/db alembic upgrade head
+
+The gateway also applies `alembic upgrade head` automatically at startup
+(Requirement 1.4).

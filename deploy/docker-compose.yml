@@ -1,0 +1,103 @@
+# TGOBJECTS3 — single-node deployment (Requirement 1).
+#
+# `docker compose up` from this directory brings up the three services the
+# design mandates (Requirement 1.2): the Gateway, PostgreSQL 17+, and the
+# static Console. The Gateway image is built from deploy/Dockerfile (task 32.2)
+# with the repository root as its build context so the whole `gateway/` package
+# and `pyproject.toml` are available to the build.
+#
+# Required operator configuration lives in a `.env` file beside this one; copy
+# `.env.example` to `.env` and fill it in. `TGOS3_MASTER_KEY` and `DATABASE_URL`
+# are mandatory — if they are absent the Gateway refuses to start and prints
+# each missing variable to stderr (Requirement 1.3). `DATABASE_URL` points at
+# the `postgres` service by its compose hostname; the default in `.env.example`
+# matches the `POSTGRES_*` values below.
+
+name: tgobjects3
+
+services:
+  # --- Gateway: S3 API + Admin API + storage/telegram/cache/jobs ----------
+  gateway:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: tgobjects3-gateway:latest
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # Ports the process binds (gateway/app/config.py defaults: 9000 / 8080).
+      # Declared explicitly so the published port mapping below stays in sync.
+      S3_PORT: ${S3_PORT:-9000}
+      ADMIN_PORT: ${ADMIN_PORT:-8080}
+      # Index connection. Overridable in .env; the default targets the
+      # `postgres` service on the shared network with the credentials below.
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://tgobjects3:tgobjects3@postgres:5432/tgobjects3}
+    ports:
+      - "${S3_PORT:-9000}:9000"
+      - "${ADMIN_PORT:-8080}:8080"
+    volumes:
+      # Staging area + record cache (design "/data volume"). A named volume so
+      # buffered uploads and the cache survive container recreation.
+      - gateway_data:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - tgobjects3
+
+  # --- PostgreSQL: rebuildable index/cache (durable truth is Telegram) -----
+  postgres:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-tgobjects3}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tgobjects3}
+      POSTGRES_DB: ${POSTGRES_DB:-tgobjects3}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      # The gateway waits on this via `depends_on: condition: service_healthy`
+      # so migrations never run against a not-yet-ready server (Requirement 1.5
+      # still applies as a backstop once the container is up).
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-tgobjects3} -d ${POSTGRES_DB:-tgobjects3}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - tgobjects3
+
+  # --- Console: static React/Vite SPA served by nginx (M4) ----------------
+  # The Console build lands in milestone M4; the SPA source under `console/` is
+  # currently a stub. This service is declared now so a single `docker compose
+  # up` wires all three services (Requirement 1.2). It builds the SPA and serves
+  # the static bundle through nginx, proxying API calls to the gateway's admin
+  # port. Until the console build exists the image build is a no-op placeholder;
+  # the service definition stays stable so M4 only has to fill in the Dockerfile.
+  console:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.console
+    image: tgobjects3-console:latest
+    restart: unless-stopped
+    environment:
+      # Where the SPA/nginx reaches the gateway's Admin API on the shared
+      # network. Consumed by the console's nginx proxy config (M4).
+      ADMIN_API_URL: ${ADMIN_API_URL:-http://gateway:8080}
+    ports:
+      - "${CONSOLE_PORT:-8081}:80"
+    depends_on:
+      - gateway
+    networks:
+      - tgobjects3
+
+volumes:
+  # Named volume backing the Gateway's /data staging + record cache.
+  gateway_data:
+  # Named volume backing PostgreSQL's data directory.
+  postgres_data:
+
+networks:
+  tgobjects3:
+    driver: bridge
