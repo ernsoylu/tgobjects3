@@ -1,10 +1,68 @@
+/*
+ * Evergreen-dark design system (admin-dashboard task 14.1).
+ *
+ * The token NAMES are preserved from the original dark theme so every existing
+ * component rule inherits the new palette by overriding the custom-property
+ * values on :root; only the values change. New semantic tokens
+ * (--panel-raised, --accent-strong, --success, --warning, --danger) and a
+ * typography + 4-based spacing scale are added so controls can reference them.
+ *
+ * Colour table, typography, spacing, and the five control states
+ * (default/hover/focus/active/disabled) follow design.md "Design System".
+ * Requirements: 9.2, 9.3, 10.2, 10.4, 10.5.
+ *
+ * Accessibility notes:
+ *  - Focus is ALWAYS a visible ring/border change, never a bare
+ *    `outline: none` (10.2, 10.5).
+ *  - Status is never conveyed by hue alone — success/accent are both greens, so
+ *    health and job states also carry an icon/label (10.4).
+ *  - Text/background pairs clear WCAG 2.1 AA: 4.5:1 for body, 3:1 for large text
+ *    and non-text UI. --text (#e8f1ea) and --text-muted (#90a699) are chosen
+ *    against --bg (#0b1a12) / --panel (#12241a); the green accent is used as a
+ *    border/fill or behind dark text, never as light text on a dark surface
+ *    (10.4).
+ */
 :root {
-  --bg: #0f1419;
-  --panel: #1a2029;
-  --panel-border: #2a323d;
-  --text: #e4e8ee;
-  --text-muted: #8b95a3;
-  --accent: #4f8cff;
+  /* --- Colour tokens (evergreen dark) --- */
+  --bg: #0b1a12; /* app background (deepest evergreen) */
+  --panel: #12241a; /* surfaces, inputs, cards */
+  --panel-raised: #17301f; /* raised surface (modal, active row, hover fill) */
+  --panel-border: #24412f; /* borders, dividers */
+  --text: #e8f1ea; /* primary text */
+  --text-muted: #90a699; /* secondary text, labels */
+  --accent: #36c57a; /* evergreen accent — primary / active / focus */
+  --accent-strong: #2aa767; /* accent pressed / active state */
+  --success: #7ee0a3; /* healthy / committed */
+  --warning: #f0c674; /* pending / caution */
+  --danger: #ff8a8a; /* errors / destructive */
+
+  /* --- Focus ring (shared across all control types) --- */
+  --focus-ring: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
+
+  /* --- Typography scale --- */
+  --font-size-hint: 0.78rem; /* hint / error */
+  --font-size-small: 0.85rem; /* labels / body-small */
+  --font-size-body: 0.9rem; /* body / controls */
+  --font-size-body-lg: 0.95rem; /* body / controls (larger) */
+  --font-size-subtitle: 1.1rem; /* subtitle */
+  --font-size-title: 1.5rem; /* screen title */
+  --font-weight-body: 400;
+  --font-weight-label: 600;
+  --font-weight-brand: 700;
+
+  /* --- Spacing scale (4-based) --- */
+  --space-2: 2px;
+  --space-4: 4px;
+  --space-6: 6px;
+  --space-8: 8px;
+  --space-10: 10px;
+  --space-12: 12px;
+  --space-16: 16px;
+  --space-20: 20px;
+  --space-24: 24px;
+  --space-32: 32px;
+  --space-40: 40px;
+
   font-family:
     system-ui,
     -apple-system,
@@ -65,12 +123,19 @@ body {
 }
 
 .app-nav-link:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--panel-raised);
+  color: var(--text);
+}
+
+/* Nav link focus — visible ring (never bare outline:none). Req 10.2, 10.5. */
+.app-nav-link:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
   color: var(--text);
 }
 
 .app-nav-link--active {
-  background: rgba(79, 140, 255, 0.15);
+  background: rgba(54, 197, 122, 0.15);
   color: var(--accent);
 }
 
@@ -110,7 +175,7 @@ body {
   border-radius: 999px;
   font-size: 0.8rem;
   color: var(--accent);
-  background: rgba(79, 140, 255, 0.12);
+  background: rgba(54, 197, 122, 0.12);
 }
 
 .screen-state {
@@ -120,7 +185,7 @@ body {
 }
 
 .screen-state--error {
-  color: #ff6b6b;
+  color: var(--danger);
 }
 
 .data-table {
@@ -191,9 +256,12 @@ body {
   min-width: 160px;
 }
 
+/* Input focus — accent border plus a visible ring (never bare outline:none).
+   Req 10.2, 10.5. */
 .field-control:focus {
   outline: none;
   border-color: var(--accent);
+  box-shadow: var(--focus-ring);
 }
 
 .field-control:disabled {
@@ -243,7 +311,7 @@ body {
 }
 
 .state--error {
-  color: #ff6b6b;
+  color: var(--danger);
 }
 
 .pagination {
@@ -276,6 +344,17 @@ body {
 .button:hover:not(:disabled) {
   border-color: var(--accent);
   color: var(--accent);
+}
+
+.button:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.button:active:not(:disabled) {
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
+  color: var(--text);
 }
 
 .button:disabled {
@@ -355,19 +434,19 @@ body {
 }
 
 .badge--uploading {
-  color: #ffd479;
-  border-color: rgba(255, 212, 121, 0.4);
-  background: rgba(255, 212, 121, 0.12);
+  color: var(--warning);
+  border-color: rgba(240, 198, 116, 0.4);
+  background: rgba(240, 198, 116, 0.12);
 }
 
 .badge--committed {
-  color: #7ee0a3;
+  color: var(--success);
   border-color: rgba(126, 224, 163, 0.4);
   background: rgba(126, 224, 163, 0.12);
 }
 
 .badge--failed {
-  color: #ff8a8a;
+  color: var(--danger);
   border-color: rgba(255, 138, 138, 0.45);
   background: rgba(255, 138, 138, 0.14);
 }
@@ -389,20 +468,47 @@ body {
   color: var(--accent);
 }
 
+/* Button focus — visible accent ring (never bare outline:none). Req 10.2, 10.5. */
+.btn:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/* Button active/pressed — accent-tinted fill resolving to --accent-strong. */
+.btn:active:not(:disabled) {
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
+  color: var(--text);
+}
+
 .btn:disabled {
   opacity: 0.5;
   cursor: default;
 }
 
+/* Destructive button — danger-tinted across all five states. */
 .btn--retry {
   border-color: rgba(255, 138, 138, 0.4);
-  color: #ff8a8a;
+  color: var(--danger);
 }
 
 .btn--retry:hover:not(:disabled) {
-  border-color: #ff8a8a;
-  color: #ff8a8a;
+  border-color: var(--danger);
+  color: var(--danger);
   background: rgba(255, 138, 138, 0.1);
+}
+
+.btn--retry:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 2px var(--bg),
+    0 0 0 4px var(--danger);
+}
+
+.btn--retry:active:not(:disabled) {
+  background: rgba(255, 138, 138, 0.22);
+  border-color: var(--danger);
+  color: var(--danger);
 }
 
 /* --- Error block --- */
@@ -494,6 +600,13 @@ body {
   color: var(--text);
 }
 
+.toast-close:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-radius: 4px;
+  color: var(--text);
+}
+
 /* --- Recovery Status screen (task 44.4, Requirement 19.4) --- */
 
 .recovery-tabs {
@@ -522,6 +635,15 @@ body {
   color: var(--text);
 }
 
+/* Tab focus — visible ring (never bare outline:none). Req 10.2, 10.5. */
+.recovery-tab:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-radius: 4px;
+  color: var(--text);
+}
+
+/* Tab active — accent underline. */
 .recovery-tab[data-state="active"] {
   color: var(--accent);
   border-bottom-color: var(--accent);
@@ -593,13 +715,18 @@ body {
 }
 
 .recovery-badge--pass {
-  background: rgba(63, 185, 118, 0.18);
-  color: #58d08a;
+  background: rgba(126, 224, 163, 0.18);
+  color: var(--success);
 }
 
 .recovery-badge--fail {
-  background: rgba(240, 97, 97, 0.18);
-  color: #f06161;
+  background: rgba(255, 138, 138, 0.18);
+  color: var(--danger);
+}
+
+.recovery-badge--warn {
+  background: rgba(240, 198, 116, 0.18);
+  color: var(--warning);
 }
 
 .recovery-table {
@@ -633,15 +760,15 @@ body {
 }
 
 .recovery-state--error {
-  color: #f06161;
+  color: var(--danger);
 }
 
 .recovery-state--warn {
-  color: #e0b341;
+  color: var(--warning);
 }
 
 .recovery-tabs code {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--panel-raised);
   padding: 1px 5px;
   border-radius: 4px;
   font-size: 0.85em;
@@ -678,9 +805,12 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+/* Input focus — accent border plus a visible ring (never bare outline:none).
+   Req 10.2, 10.5. */
 .settings-input:focus {
   outline: none;
   border-color: var(--accent);
+  box-shadow: var(--focus-ring);
 }
 
 .settings-input:disabled {
@@ -689,7 +819,13 @@ body {
 }
 
 .settings-input[aria-invalid="true"] {
-  border-color: rgba(255, 138, 138, 0.6);
+  border-color: var(--danger);
+}
+
+.settings-input[aria-invalid="true"]:focus {
+  box-shadow:
+    0 0 0 2px var(--bg),
+    0 0 0 4px var(--danger);
 }
 
 .settings-hint {
@@ -702,7 +838,7 @@ body {
 .settings-error {
   margin: 0;
   font-size: 0.78rem;
-  color: #ff8a8a;
+  color: var(--danger);
   line-height: 1.4;
 }
 
@@ -712,13 +848,642 @@ body {
   margin-top: 4px;
 }
 
+/* Unsaved-changes affordance (Requirement 4.4). Not conveyed by hue alone —
+   the message text names the state and the available choices. */
+.settings-dirty {
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid rgba(224, 168, 0, 0.5);
+  border-radius: 6px;
+  background: rgba(224, 168, 0, 0.08);
+  font-size: 0.82rem;
+  color: var(--text);
+  line-height: 1.4;
+}
+
+/* Primary button — accent-tinted across all five states. */
 .btn--primary {
-  border-color: rgba(79, 140, 255, 0.5);
+  border-color: rgba(54, 197, 122, 0.5);
   color: var(--accent);
 }
 
 .btn--primary:hover:not(:disabled) {
   border-color: var(--accent);
   color: var(--accent);
-  background: rgba(79, 140, 255, 0.12);
+  background: rgba(54, 197, 122, 0.12);
+}
+
+.btn--primary:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.btn--primary:active:not(:disabled) {
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
+  color: var(--text);
+}
+
+/* --- Login screen (admin-dashboard task 5.1, Requirements 1.1, 1.3, 1.4, 1.8) --- */
+
+.login-screen {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-24);
+  background: var(--bg);
+}
+
+.login-card {
+  width: 100%;
+  max-width: 380px;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 10px;
+  padding: var(--space-32);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-24);
+}
+
+.login-header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.login-brand {
+  margin: 0;
+  font-size: var(--font-size-small);
+  font-weight: var(--font-weight-brand);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.login-title {
+  margin: 0;
+  font-size: var(--font-size-title);
+}
+
+.login-description {
+  margin: 0;
+  font-size: var(--font-size-small);
+  color: var(--text-muted);
+}
+
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-16);
+}
+
+.login-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+.login-label {
+  font-size: var(--font-size-small);
+  font-weight: var(--font-weight-label);
+  color: var(--text);
+}
+
+.login-input {
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  color: var(--text);
+  padding: var(--space-8) var(--space-10);
+  font-size: var(--font-size-body);
+}
+
+/* Input focus — accent border plus a visible ring (never bare outline:none).
+   Req 10.2, 10.5. */
+.login-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: var(--focus-ring);
+}
+
+.login-input:read-only {
+  color: var(--text-muted);
+  cursor: default;
+}
+
+.login-input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.login-input[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
+.login-input[aria-invalid="true"]:focus {
+  box-shadow:
+    0 0 0 2px var(--bg),
+    0 0 0 4px var(--danger);
+}
+
+.login-error {
+  margin: 0;
+  font-size: var(--font-size-hint);
+  color: var(--danger);
+  line-height: 1.4;
+}
+
+.login-submit {
+  margin-top: var(--space-4);
+  justify-content: center;
+  text-align: center;
+}
+
+/* --- Sidebar logout control (admin-dashboard Req 1.7) --- */
+.app-sidebar {
+  display: flex;
+  flex-direction: column;
+}
+
+.app-sidebar-footer {
+  margin-top: auto;
+  padding-top: 20px;
+}
+
+.app-logout {
+  width: 100%;
+}
+
+/* --- Setup wizard (route reachable while setup_required) --- */
+.setup-wizard {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 24px;
+}
+
+.setup-card {
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 10px;
+  padding: 28px;
+}
+
+/* Placeholder variant centres a short card (task 5.2 fallback). */
+.setup-wizard--placeholder {
+  align-items: center;
+}
+
+.setup-wizard--placeholder .setup-card {
+  max-width: 420px;
+}
+
+/* The real wizard shell is wider to host the step indicator + step body. */
+.setup-card--wizard {
+  width: 100%;
+  max-width: 640px;
+}
+
+.setup-wizard-header {
+  margin-bottom: 20px;
+}
+
+.setup-wizard-title {
+  margin: 0 0 4px;
+  font-size: 1.4rem;
+}
+
+.setup-wizard-subtitle {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+/* --- Step indicator (Req 3.3) --- */
+.setup-steps {
+  margin-bottom: 24px;
+}
+
+.setup-steps-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: setup-step;
+}
+
+.setup-step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+/* Reachable steps render as a button so the operator can return/advance (Req 3.6). */
+.setup-step-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  padding: 2px 4px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.setup-step-nav:hover {
+  color: var(--text);
+}
+
+.setup-step-nav:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.setup-step-marker {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  border: 1px solid var(--panel-border);
+  background: var(--panel);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+/* Completed steps get an accent-filled marker and a check glyph. */
+.setup-step--completed {
+  color: var(--text);
+}
+
+.setup-step--completed .setup-step-marker {
+  background: rgba(54, 197, 122, 0.15);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* The current step is emphasised (never by colour alone — see .setup-step-status). */
+.setup-step--current {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.setup-step--current .setup-step-marker {
+  border-color: var(--accent);
+  color: var(--accent);
+  box-shadow: var(--focus-ring);
+}
+
+/* Visually hidden status words keep current/completed meaning available to AT. */
+.setup-step-status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* --- Step panel + step body --- */
+.setup-step-panel {
+  border-top: 1px solid var(--panel-border);
+  padding-top: 20px;
+}
+
+.setup-step-title {
+  margin: 0 0 12px;
+  font-size: 1.1rem;
+}
+
+.setup-step-placeholder {
+  margin: 0 0 20px;
+  color: var(--text-muted);
+}
+
+.setup-step-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+/* --- Setup wizard: Buckets step (Req 3.2, 3.7) --- */
+.setup-card {
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 10px;
+  padding: 28px;
+}
+
+.setup-form {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.buckets-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.buckets-row {
+  display: flex;
+  gap: 12px;
+  align-items: flex-end;
+}
+
+.buckets-row .field {
+  flex: 1;
+}
+
+.buckets-choices {
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.buckets-choice-options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.buckets-choice-option,
+.buckets-confirm {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+/* Reinitialise warning — danger-tinted so it is not conveyed by colour alone
+   (it carries explicit text and role="alert"). Req 3.7, 10. */
+.buckets-warning {
+  border: 1px solid rgba(255, 138, 138, 0.45);
+  background: rgba(255, 138, 138, 0.08);
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: var(--danger);
+  margin: 8px 0;
+}
+
+.buckets-reinit-gate {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.buckets-error {
+  border: 1px solid rgba(255, 138, 138, 0.45);
+  background: rgba(255, 138, 138, 0.08);
+  border-radius: 8px;
+  padding: 12px;
+  color: var(--danger);
+}
+
+.setup-actions {
+  display: flex;
+  gap: 12px;
+}
+
+/* --- Setup wizard: Telegram step (Req 2.1, 2.3, 2.4, 2.7, 3.3) --- */
+.setup-telegram .field {
+  max-width: 420px;
+}
+
+/* Login / credential error — danger-tinted but never conveyed by colour alone
+   (it carries explicit text and role="alert"). Req 2.4, 2.7, 10. */
+.setup-error {
+  border: 1px solid rgba(255, 138, 138, 0.45);
+  background: rgba(255, 138, 138, 0.08);
+  border-radius: 8px;
+  padding: 12px;
+  color: var(--danger);
+  margin: 0;
+}
+
+/* --- Config step (admin-dashboard task 8.2, Requirements 3.4/3.5, 12.6) --- */
+
+/* A path + max-size pair laid out side by side where there is room, stacking on
+   narrow viewports. */
+.setup-config-group {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.setup-config-group .field {
+  flex: 1 1 220px;
+}
+
+/* Guidance for a size field (the accepted range). Muted so it reads as a hint
+   rather than an error. */
+.field-hint {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+/* Inline per-field validation error. Danger-tinted but never conveyed by hue
+   alone — it carries explicit text naming the field and its range, and uses
+   role="alert". Req 3.5, 10, 12.6. */
+.field-error {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--danger);
+  line-height: 1.4;
+}
+
+/* --- Access Keys panel (admin-dashboard task 10.4, Requirements 5.1–5.6, 11.3) --- */
+
+.keys-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-16);
+}
+
+/* --- Configuration Visibility panel (admin-dashboard task 10.6, Requirement 6) --- */
+
+.config-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+.keys-create {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-12);
+  flex-wrap: wrap;
+}
+
+.keys-create-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  min-width: 240px;
+}
+
+.keys-secret {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+  margin: var(--space-8) 0 0;
+}
+
+.keys-secret-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.keys-secret-row dt {
+  margin: 0;
+  font-size: var(--font-size-small);
+  color: var(--text-muted);
+}
+
+.keys-secret-row dd {
+  margin: 0;
+}
+
+.keys-secret-value {
+  display: block;
+  word-break: break-all;
+  background: var(--panel-raised);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  padding: var(--space-8) var(--space-10);
+  font-size: var(--font-size-body);
+}
+
+/* --- Radix dialog (shared confirm / one-time-secret surfaces) --- */
+
+.dialog-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.dialog-content {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 92vw;
+  max-width: 460px;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 10px;
+  padding: var(--space-24);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-16);
+}
+
+.dialog-content:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.dialog-title {
+  margin: 0;
+  font-size: var(--font-size-title);
+}
+
+.dialog-description {
+  margin: 0;
+  font-size: var(--font-size-small);
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-10);
+}
+
+/* --- System Health panel (admin-dashboard task 10.7, Requirement 7) --- */
+
+.health-section {
+  margin-top: var(--space-24);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+.health-readiness {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+/* Raw Prometheus text dump: monospace, scrollable, never wrapping mid-metric. */
+.health-metrics {
+  margin: var(--space-8) 0 0;
+  max-height: 360px;
+  overflow: auto;
+  padding: var(--space-12);
+  background: var(--panel-raised);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  white-space: pre;
+}
+
+/* --- Setup wizard: Finalize step (admin-dashboard task 8.4, Req 3.8–3.12, 11.2/11.3) --- */
+
+/* Intro / success summary copy at the top of the step body. */
+.setup-step-intro {
+  margin: 0 0 20px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+/* The Recovery Kit download block and the one-time-secret block, each framed so
+   the operator reads them as distinct deliverables. */
+.finalize-kit,
+.finalize-secret {
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.finalize-subtitle {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.finalize-description {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--font-size-small);
+  line-height: 1.5;
 }

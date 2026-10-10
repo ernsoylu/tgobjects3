@@ -1,28 +1,38 @@
 /**
- * Settings screen (Requirements 19.5–19.7).
+ * Settings screen (Requirements 4–7, 6.1).
  *
- * Fetches the five operator-editable runtime settings from
- * `GET /admin/settings` via {@link useSettings} and populates an editable form:
- * staging size, cache size, cache half-life, read-ahead count, and upload
- * concurrency. On save it PUTs the whole set through {@link useUpdateSettings}
- * (which invalidates the settings query so the applied values re-render — the
- * change is effective within 5 s with no restart, Requirement 19.5).
+ * A Radix `Tabs` host — consistent with {@link RecoveryScreen}'s tabs — with
+ * four panels:
  *
- * Client-side validation mirrors the backend `SettingsBody` ranges
- * (`gateway/app/admin/router.py`): `read_ahead` is 0–32 inclusive, every other
- * field is ≥ 1. Inline field errors block submission before a request is made.
- * The backend's cross-field rule — a staging-size reduction below the currently
- * reserved bytes is rejected with HTTP 409 (Requirements 19.6/19.7) — cannot be
- * checked client-side, so it (and any 422 range rejection) is surfaced as a
- * readable Radix toast, matching how the Jobs screen reports errors.
+ *   - **Runtime Settings** — the operator-editable runtime-settings form
+ *     (Requirement 4). Fetches the five settings from `GET /admin/settings`
+ *     via {@link useSettings} and PUTs the whole set through
+ *     {@link useUpdateSettings}; changes are effective within 5 s with no
+ *     restart (Requirements 19.5–19.7). Preserved verbatim as the first panel.
+ *   - **Access Keys** — list/create/delete access keys (Requirement 5).
+ *   - **Configuration Visibility** — read-only environment settings, with
+ *     secrets shown only as set/not set (Requirement 6).
+ *   - **System Health** — readiness + dependency panel plus a metrics fetch
+ *     control (Requirement 7).
+ *
+ * Each of the latter three panels is a dedicated component — `AccessKeysPanel`
+ * (task 10.4), `ConfigVisibilityPanel` (task 10.6), and `SystemHealthPanel`
+ * (task 10.7) — dropped into its matching `Tabs.Content` slot. Tab
+ * accessibility (keyboard operation, visible focus,
+ * ARIA roles) comes from Radix `Tabs` and the shared `.recovery-tab*` styling,
+ * matching `RecoveryScreen` (Requirement 6.1).
  *
  * The data layer lives in `../api/settings` so this screen stays presentational.
  */
+import * as Tabs from "@radix-ui/react-tabs";
 import * as Toast from "@radix-ui/react-toast";
-import axios from "axios";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 
+import { describeAdminError, errorMessage } from "../api/errors";
 import { useSettings, useUpdateSettings, type SettingsValues } from "../api/settings";
+import { AccessKeysPanel } from "./settings/AccessKeysPanel";
+import { ConfigVisibilityPanel } from "./settings/ConfigVisibilityPanel";
+import { SystemHealthPanel } from "./settings/SystemHealthPanel";
 
 /** The editable settings fields, in display order. */
 const FIELD_KEYS = [
@@ -95,38 +105,42 @@ interface Notice {
 }
 
 /**
- * Turn an unknown thrown value into an operator-readable message. The Admin API
- * reports failures as JSON `{ "detail": ... }`; a 409 (staging below reserved)
- * carries a plain-string detail, while a 422 (range) carries FastAPI's
- * validation-error array. Fall back to the axios/Error message otherwise.
+ * Build the operator-facing message for a failed save (Requirement 4.7).
+ *
+ * A staging-size reduction below the currently reserved bytes is rejected by
+ * the backend with HTTP 409 and a `detail` of the form
+ * `"staging_max_size cannot be reduced below the currently reserved N bytes;
+ * minimum permitted value is N"` (see `gateway/app/admin/router.py`). The
+ * shared {@link describeAdminError} already surfaces that `detail` verbatim, so
+ * the minimum permitted value is present in the message. For a 409 we parse the
+ * minimum out and lead with it explicitly so the operator sees the smallest
+ * value they may set, then append the backend's full explanation.
+ *
+ * Any non-409 failure (422 range rejection, 503, network, …) is reported with
+ * the shared message as-is. The caller must NOT present the change as applied
+ * (no success notice, the form stays dirty) regardless of which branch runs.
  */
-function errorMessage(error: unknown): string {
-  if (axios.isAxiosError(error)) {
-    const detail = (error.response?.data as { detail?: unknown } | undefined)?.detail;
-    if (typeof detail === "string" && detail.length > 0) {
-      return detail;
-    }
-    if (Array.isArray(detail)) {
-      const messages = detail
-        .map((item) => {
-          const msg = (item as { msg?: unknown }).msg;
-          const loc = (item as { loc?: unknown }).loc;
-          const field = Array.isArray(loc) ? loc[loc.length - 1] : undefined;
-          const text = typeof msg === "string" ? msg : "invalid value";
-          return typeof field === "string" ? `${field}: ${text}` : text;
-        })
-        .filter((text) => text.length > 0);
-      if (messages.length > 0) {
-        return messages.join("; ");
-      }
-    }
-    return error.message;
+function saveErrorNotice(error: unknown): Notice {
+  const info = describeAdminError(error);
+  if (info.kind === "conflict") {
+    const match = /minimum permitted value is (\d+)/i.exec(info.message);
+    const description =
+      match !== null
+        ? `The smallest value you can set is ${match[1]}. ${info.message}`
+        : info.message;
+    return { title: "Save rejected", description, variant: "error" };
   }
-  if (error instanceof Error) {
-    return error.message;
-  }
-  return "Unknown error";
+  return { title: "Save failed", description: info.message, variant: "error" };
 }
+
+/**
+ * The Admin API's status→message mapping — turning a 409 (plain-string
+ * `detail`, e.g. staging below reserved) or a 422 (FastAPI validation-error
+ * array, naming the field and its range) into an operator-readable string — is
+ * centralised in {@link errorMessage} (`../api/errors`) so every screen reports
+ * failures identically (Requirements 12.2, 12.4, 12.6). This panel re-exports
+ * nothing; it simply calls the shared helper.
+ */
 
 /** Build the string-valued form state from a fetched settings snapshot. */
 function toFormState(values: SettingsValues): FormState {
@@ -164,7 +178,84 @@ function fieldError(spec: FieldSpec, raw: string): string | null {
   return null;
 }
 
+/**
+ * Settings screen tab host (Requirement 6.1).
+ *
+ * Hosts four tab panels — Runtime Settings (the live form), Access Keys,
+ * Configuration Visibility, and System Health — each a dedicated panel
+ * component. The `Toast.Provider` wraps the whole screen so the Runtime
+ * Settings save flow can surface success/error toasts regardless of which tab
+ * is active.
+ */
 export function SettingsScreen(): JSX.Element {
+  return (
+    <Toast.Provider swipeDirection="right">
+      <section className="screen">
+        <header className="screen-header">
+          <h1 className="screen-title">Settings</h1>
+          <p className="screen-description">
+            Runtime configuration, access keys, environment visibility, and system health.
+          </p>
+        </header>
+
+        <Tabs.Root className="recovery-tabs" defaultValue="runtime">
+          <Tabs.List className="recovery-tablist" aria-label="Settings views">
+            <Tabs.Trigger className="recovery-tab" value="runtime">
+              Runtime Settings
+            </Tabs.Trigger>
+            <Tabs.Trigger className="recovery-tab" value="keys">
+              Access Keys
+            </Tabs.Trigger>
+            <Tabs.Trigger className="recovery-tab" value="config">
+              Configuration Visibility
+            </Tabs.Trigger>
+            <Tabs.Trigger className="recovery-tab" value="health">
+              System Health
+            </Tabs.Trigger>
+          </Tabs.List>
+
+          <Tabs.Content value="runtime">
+            <RuntimeSettingsPanel />
+          </Tabs.Content>
+
+          <Tabs.Content value="keys">
+            <AccessKeysPanel />
+          </Tabs.Content>
+
+          <Tabs.Content value="config">
+            <ConfigVisibilityPanel />
+          </Tabs.Content>
+
+          <Tabs.Content value="health">
+            <SystemHealthPanel />
+          </Tabs.Content>
+        </Tabs.Root>
+      </section>
+
+      <Toast.Viewport className="toast-viewport" />
+    </Toast.Provider>
+  );
+}
+
+/**
+ * Runtime Settings panel (Requirement 4; Requirements 19.5–19.7).
+ *
+ * Fetches the five operator-editable runtime settings from
+ * `GET /admin/settings` via {@link useSettings} and populates an editable form:
+ * staging size, cache size, cache half-life, read-ahead count, and upload
+ * concurrency. On save it PUTs the whole set through {@link useUpdateSettings}
+ * (which invalidates the settings query so the applied values re-render — the
+ * change is effective within 5 s with no restart, Requirement 19.5).
+ *
+ * Client-side validation mirrors the backend `SettingsBody` ranges
+ * (`gateway/app/admin/router.py`): `read_ahead` is 0–32 inclusive, every other
+ * field is ≥ 1. Inline field errors block submission before a request is made.
+ * The backend's cross-field rule — a staging-size reduction below the currently
+ * reserved bytes is rejected with HTTP 409 (Requirements 19.6/19.7) — cannot be
+ * checked client-side, so it (and any 422 range rejection) is surfaced as a
+ * readable Radix toast, matching how the Jobs screen reports errors.
+ */
+function RuntimeSettingsPanel(): JSX.Element {
   const settings = useSettings();
   const update = useUpdateSettings();
 
@@ -237,11 +328,7 @@ export function SettingsScreen(): JSX.Element {
           });
         },
         onError: (error) => {
-          showNotice({
-            title: "Save failed",
-            description: errorMessage(error),
-            variant: "error",
-          });
+          showNotice(saveErrorNotice(error));
         },
       });
     },
@@ -255,28 +342,18 @@ export function SettingsScreen(): JSX.Element {
   }, [settings.data]);
 
   return (
-    <Toast.Provider swipeDirection="right">
-      <section className="screen">
-        <header className="screen-header">
-          <h1 className="screen-title">Settings</h1>
-          <p className="screen-description">
-            Runtime configuration. Changes take effect within a few seconds without restarting the
-            gateway.
-          </p>
-        </header>
-
-        <SettingsContent
-          settings={settings}
-          form={form}
-          errors={errors}
-          hasErrors={hasErrors}
-          isDirty={isDirty}
-          isSaving={update.isPending}
-          onFieldChange={onFieldChange}
-          onSubmit={onSubmit}
-          onReset={onReset}
-        />
-      </section>
+    <>
+      <SettingsContent
+        settings={settings}
+        form={form}
+        errors={errors}
+        hasErrors={hasErrors}
+        isDirty={isDirty}
+        isSaving={update.isPending}
+        onFieldChange={onFieldChange}
+        onSubmit={onSubmit}
+        onReset={onReset}
+      />
 
       {notice ? (
         <Toast.Root
@@ -296,14 +373,13 @@ export function SettingsScreen(): JSX.Element {
           </Toast.Close>
         </Toast.Root>
       ) : null}
-      <Toast.Viewport className="toast-viewport" />
-    </Toast.Provider>
+    </>
   );
 }
 
 /**
- * The loading / error / form body of the screen, split out so the outer
- * component only wires the toast provider and submit handler.
+ * The loading / error / form body of the Runtime Settings panel, split out so
+ * the panel component only wires the form handlers and toast.
  */
 function SettingsContent(props: {
   settings: ReturnType<typeof useSettings>;
@@ -319,10 +395,11 @@ function SettingsContent(props: {
   const { settings, form, errors, hasErrors, isDirty, isSaving, onFieldChange, onSubmit, onReset } =
     props;
 
-  if (settings.isPending || !form) {
-    return <p className="screen-note">Loading settings…</p>;
-  }
-
+  // Surface a load failure before the loading guard: on an error the query is
+  // no longer pending but `form` is still null (nothing was fetched to seed
+  // it), so checking `isError` first ensures the failure is announced via the
+  // `role="alert"` region instead of showing the loading note indefinitely
+  // (Requirement 10.6).
   if (settings.isError) {
     return (
       <div className="screen-error" role="alert">
@@ -334,8 +411,30 @@ function SettingsContent(props: {
     );
   }
 
+  if (settings.isPending || !form) {
+    return <p className="screen-note">Loading settings…</p>;
+  }
+
   return (
     <form className="settings-form" onSubmit={onSubmit} noValidate>
+      {/*
+        Unsaved-changes affordance (Requirement 4.4): while the form differs
+        from the last-displayed (applied) values, announce that unsaved changes
+        are present via an `aria-live` status region, and point the operator at
+        the two choices — submit (Save changes) or discard (Discard changes,
+        which restores the applied values). The region is kept in the DOM so
+        assistive tech picks up the transition; `hidden` toggles visibility.
+      */}
+      <p
+        className="settings-dirty"
+        role="status"
+        aria-live="polite"
+        hidden={!isDirty}
+        data-testid="unsaved-indicator"
+      >
+        You have unsaved changes. Save them to apply, or discard to restore the last-saved values.
+      </p>
+
       {FIELD_SPECS.map((spec) => {
         const error = errors[spec.key];
         const controlId = `settings-${spec.key}`;
@@ -381,7 +480,13 @@ function SettingsContent(props: {
         >
           {isSaving ? "Saving…" : "Save changes"}
         </button>
-        <button type="button" className="btn" disabled={isSaving || !isDirty} onClick={onReset}>
+        <button
+          type="button"
+          className="btn"
+          disabled={isSaving || !isDirty}
+          onClick={onReset}
+          title="Discard unsaved changes and restore the last-saved values"
+        >
           Reset
         </button>
       </div>

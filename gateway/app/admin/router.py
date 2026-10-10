@@ -18,6 +18,10 @@ surface the design's "Admin API" section lists:
 * ``GET /admin/keys`` + ``POST /admin/keys`` + ``DELETE /admin/keys/{id}`` —
   S3 access-key management (Requirement 17; the create response returns the
   secret exactly once, 17.2).
+* ``GET /admin/config`` — read-only Configuration Visibility: the non-secret
+  Environment_Settings (name/value, requiring a redeploy or restart to change)
+  plus a set/not-set flag for each secret Environment_Setting, never the secret
+  value (admin-dashboard Requirement 6; 11.1).
 
 Authentication and CSRF (Requirement 17.5–17.7)
 -----------------------------------------------
@@ -88,6 +92,7 @@ __all__ = [
     "CSRF_HEADER",
     "JOB_STATE_FAILED",
     "AdminAuthNotConfiguredError",
+    "ConfigVisibility",
     "RuntimeSettingsStore",
     "RuntimeSettingsValues",
     "create_admin_router",
@@ -297,6 +302,58 @@ class SettingsBody(BaseModel):
     upload_concurrency: int = Field(ge=1)
 
 
+class EnvSettingEntry(BaseModel):
+    """One non-secret Environment_Setting for the Configuration Visibility panel.
+
+    Mirrors the admin-dashboard glossary's Environment_Setting: a value
+    materialised from the environment at startup by
+    :class:`~gateway.app.config.Settings` that cannot be changed at runtime and
+    requires a redeploy or restart to change (admin-dashboard Requirement 6.2).
+    The value is rendered verbatim as a string so the Console shows it read-only;
+    no editing control is offered (6.4). Only non-secret settings appear here —
+    secret settings are reported through :class:`SecretEnvSettingEntry` as a
+    set/not-set flag and never carry their value (6.3).
+    """
+
+    name: str
+    value: str
+
+
+class SecretEnvSettingEntry(BaseModel):
+    """One secret Environment_Setting, reported as set/not-set only.
+
+    Per admin-dashboard Requirements 6.3 and 11.1 the Dashboard must never
+    display a secret Environment_Setting value (the Master_Key or the database
+    URL's embedded credentials); it indicates only whether the value is
+    configured. This entry therefore carries a boolean ``is_set`` and never the
+    secret itself, so no secret material crosses the Admin API boundary.
+    """
+
+    name: str
+    is_set: bool
+
+
+class ConfigVisibility(BaseModel):
+    """The read-only Configuration Visibility payload for ``GET /admin/config``.
+
+    Groups the two kinds of Environment_Setting the Console's Configuration
+    Visibility panel renders (admin-dashboard Requirement 6):
+
+    * ``environment`` — the non-secret settings, each as a name/value pair shown
+      read-only and labelled as requiring a redeploy or restart to change
+      (6.2/6.4).
+    * ``secrets`` — the secret settings, each reported only as set/not-set and
+      never carrying its value (6.3/11.1).
+
+    The five operator-editable Runtime_Settings are intentionally absent: they
+    are served (and edited) through ``GET``/``PUT /admin/settings`` (Requirement
+    4) rather than this read-only surface.
+    """
+
+    environment: list[EnvSettingEntry]
+    secrets: list[SecretEnvSettingEntry]
+
+
 class CreateKeyBody(BaseModel):
     """The create-access-key request body (Requirement 17)."""
 
@@ -430,6 +487,7 @@ def create_admin_router(
     _register_objects(router, sessions, read_dep)
     _register_jobs(router, sessions, read_dep, write_dep)
     _register_settings(router, runtime_settings, staging, read_dep, write_dep)
+    _register_config(router, context.settings, read_dep)
     _register_keys(router, sessions, root_key, read_dep, write_dep)
 
     if setup_router is not None:
@@ -705,6 +763,87 @@ def _register_settings(
             )
         )
         return body
+
+
+#: Secret Environment_Settings — their *values* must never cross the Admin API
+#: boundary (admin-dashboard Requirements 6.3, 11.1). ``TGOS3_MASTER_KEY`` is the
+#: root key itself; ``DATABASE_URL`` embeds the PostgreSQL credentials, so it is
+#: treated as a secret and reported only as set/not-set, never echoed. Everything
+#: else on :class:`~gateway.app.config.Settings` is a non-secret Environment_Setting.
+_SECRET_ENV_SETTINGS: frozenset[str] = frozenset({"TGOS3_MASTER_KEY", "DATABASE_URL"})
+
+#: The five operator-editable Runtime_Settings (admin-dashboard Requirement 4),
+#: served and edited through ``GET``/``PUT /admin/settings`` rather than the
+#: read-only Configuration Visibility surface. Excluded from ``GET /admin/config``
+#: so the two surfaces stay disjoint (6.1).
+_RUNTIME_SETTING_FIELDS: frozenset[str] = frozenset(
+    {
+        "STAGING_MAX_SIZE",
+        "CACHE_MAX_SIZE",
+        "CACHE_HALF_LIFE",
+        "READ_AHEAD",
+        "UPLOAD_CONCURRENCY",
+    }
+)
+
+
+def _register_config(
+    router: APIRouter,
+    settings: Settings,
+    read_dep: Any,
+) -> None:
+    """Register ``GET /admin/config`` (admin-dashboard Requirement 6).
+
+    Exposes a read-only view of the deployment-fixed Environment_Settings so the
+    Console's Configuration Visibility panel can show which configuration can
+    only change via a redeploy or restart. Non-secret settings are returned as
+    name/value pairs (6.2/6.4); secret settings (the master key, the database URL
+    with its embedded credentials) are returned only as a set/not-set flag and
+    never carry their value (6.3/11.1). The five operator-editable
+    Runtime_Settings are omitted — they live on ``/admin/settings`` (6.1).
+    """
+
+    @router.get("/config", dependencies=[read_dep])
+    async def get_config() -> ConfigVisibility:
+        """Return the read-only environment configuration (Requirement 6).
+
+        Iterates the frozen startup :class:`~gateway.app.config.Settings` model
+        fields: each secret field becomes a set/not-set entry (its value never
+        leaves the boundary, 6.3/11.1); each remaining non-runtime field becomes
+        a read-only name/value entry (6.2/6.4). Values are stringified for
+        display; booleans render as ``"true"``/``"false"`` and integers/strings
+        verbatim. Field order follows the model's declaration order so the panel
+        renders deterministically.
+        """
+        environment: list[EnvSettingEntry] = []
+        secrets_out: list[SecretEnvSettingEntry] = []
+        for name in type(settings).model_fields:
+            value = getattr(settings, name)
+            if name in _SECRET_ENV_SETTINGS:
+                # A required secret is a non-empty string once Settings validates;
+                # report only whether it is configured, never the value itself.
+                secrets_out.append(
+                    SecretEnvSettingEntry(
+                        name=name,
+                        is_set=bool(value) and str(value).strip() != "",
+                    )
+                )
+                continue
+            if name in _RUNTIME_SETTING_FIELDS:
+                continue
+            environment.append(EnvSettingEntry(name=name, value=_render_env_value(value)))
+        return ConfigVisibility(environment=environment, secrets=secrets_out)
+
+
+def _render_env_value(value: Any) -> str:
+    """Render a non-secret Environment_Setting value for read-only display.
+
+    Booleans become lower-case ``"true"``/``"false"`` so the panel reads
+    naturally; every other scalar (int, str, float) is passed through ``str``.
+    """
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return str(value)
 
 
 def _register_keys(

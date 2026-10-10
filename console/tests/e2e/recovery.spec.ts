@@ -10,7 +10,7 @@
  */
 import { expect, test } from "@playwright/test";
 
-import { fulfilJson } from "./fixtures";
+import { fulfilJson, signIn } from "./fixtures";
 
 const STATUS_WITH_DATA = {
   last_checkpoint_at: "2024-06-01T08:15:30Z",
@@ -24,7 +24,7 @@ const STATUS_WITH_DATA = {
 
 test("renders checkpoint time, drill outcome, and high-water marks", async ({ page }) => {
   await page.route("**/admin/recovery", (route) => fulfilJson(route, STATUS_WITH_DATA));
-  await page.goto("/recovery");
+  await signIn(page, { to: "/recovery" });
 
   await expect(page.getByText("2024-06-01 08:15:30 UTC")).toBeVisible();
   await expect(page.getByText("Pass")).toBeVisible();
@@ -37,14 +37,14 @@ test("renders checkpoint time, drill outcome, and high-water marks", async ({ pa
 test("shows an informative panel when the endpoint is absent", async ({ page }) => {
   // The hook treats 404/501 as "endpoint not available" and resolves to null.
   await page.route("**/admin/recovery", (route) => fulfilJson(route, { detail: "Not Found" }, 404));
-  await page.goto("/recovery");
+  await signIn(page, { to: "/recovery" });
 
   await expect(page.getByText("Recovery status endpoint not available.")).toBeVisible();
 });
 
 test("the Recovery Kit tab shows operator guidance", async ({ page }) => {
   await page.route("**/admin/recovery", (route) => fulfilJson(route, STATUS_WITH_DATA));
-  await page.goto("/recovery");
+  await signIn(page, { to: "/recovery" });
 
   await page.getByRole("tab", { name: "Recovery Kit" }).click();
   await expect(page.getByText(/Master key/)).toBeVisible();

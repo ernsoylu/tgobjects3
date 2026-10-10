@@ -76,34 +76,12 @@ require_compose() {
   fi
 }
 
-# Build the compose invocation. The `console` service in docker-compose.yml
-# builds from deploy/Dockerfile.console, which only exists once the Console
-# deployment image (milestone M4) is added. If it is absent we scope every
-# command to the core services so the stack still builds and runs.
+# Run a compose subcommand against docker-compose.yml. All three services
+# (gateway, postgres, console) always participate: the console builds from
+# deploy/Dockerfile.console with the repository root as its build context
+# (set in docker-compose.yml), so no service scoping is needed here.
 compose() {
-  local -a services=()
-  if [[ ! -f "${SCRIPT_DIR}/Dockerfile.console" ]]; then
-    services=(gateway postgres)
-  fi
-
-  local -a cmd=("${COMPOSE[@]}" -f "$COMPOSE_FILE")
-  local sub="$1"; shift
-
-  case "$sub" in
-    # Subcommands that accept a service list get the scoped set appended.
-    build|up|create|pull|start|restart|stop|rm)
-      "${cmd[@]}" "$sub" "$@" "${services[@]}"
-      ;;
-    *)
-      "${cmd[@]}" "$sub" "$@"
-      ;;
-  esac
-}
-
-console_note() {
-  if [[ ! -f "${SCRIPT_DIR}/Dockerfile.console" ]]; then
-    warn "Console service skipped: deploy/Dockerfile.console not present yet (M4). Running core services only (gateway + postgres)."
-  fi
+  "${COMPOSE[@]}" -f "$COMPOSE_FILE" "$@"
 }
 
 # --- .env bootstrap --------------------------------------------------------
@@ -177,15 +155,13 @@ install_prereqs() {
 print_endpoints() {
   # Read published host ports from .env (fall back to compose defaults).
   local s3_port admin_port console_port
-  s3_port="$\(get_env S3_PORT 9000)"
+  s3_port="$(get_env S3_PORT 9000)"
   admin_port="$(get_env ADMIN_PORT 8080)"
   console_port="$(get_env CONSOLE_PORT 8081)"
   info "Endpoints:"
   printf '    S3 API    : http://localhost:%s\n' "$s3_port"
   printf '    Admin API : http://localhost:%s  (health: /health/ready)\n' "$admin_port"
-  if [[ -f "${SCRIPT_DIR}/Dockerfile.console" ]]; then
-    printf '    Console   : http://localhost:%s\n' "$console_port"
-  fi
+  printf '    Console   : http://localhost:%s\n' "$console_port"
 }
 
 get_env() {
@@ -198,14 +174,14 @@ get_env() {
 
 # --- Commands --------------------------------------------------------------
 cmd_build() {
-  require_compose; ensure_env; console_note
+  require_compose; ensure_env
   info "Building images (context: ${REPO_ROOT})..."
   compose build "$@"
   ok "Build complete."
 }
 
 cmd_up() {
-  require_compose; ensure_env; console_note
+  require_compose; ensure_env
   info "Starting stack..."
   compose up -d "$@"
   ok "Stack is up."

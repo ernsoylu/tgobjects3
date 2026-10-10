@@ -9,7 +9,7 @@
  */
 import { expect, test } from "@playwright/test";
 
-import { SAMPLE_BUCKETS, fulfilJson, type ObjectsPage } from "./fixtures";
+import { SAMPLE_BUCKETS, fulfilJson, signIn, type ObjectsPage } from "./fixtures";
 
 /** Build an objects page response for a given cursor/prefix. */
 function pageFor(prefix: string, startAfter: string | null): ObjectsPage {
@@ -70,7 +70,7 @@ test.beforeEach(async ({ page }) => {
 });
 
 test("lists objects for the default bucket with readable sizes", async ({ page }) => {
-  await page.goto("/objects");
+  await signIn(page, { to: "/objects" });
 
   // The selector defaults to the first bucket (photos).
   await expect(page.locator("#object-bucket")).toHaveValue("photos");
@@ -84,7 +84,7 @@ test("lists objects for the default bucket with readable sizes", async ({ page }
 });
 
 test("filtering by prefix reloads the listing", async ({ page }) => {
-  await page.goto("/objects");
+  await signIn(page, { to: "/objects" });
   await expect(page.locator("table.data-table tbody tr")).toContainText("a/first.bin");
 
   await page.locator("#object-prefix").fill("logs/");
@@ -95,7 +95,7 @@ test("filtering by prefix reloads the listing", async ({ page }) => {
 });
 
 test("pages forward and back through the cursor", async ({ page }) => {
-  await page.goto("/objects");
+  await signIn(page, { to: "/objects" });
 
   await expect(page.getByText("Page 1")).toBeVisible();
   await expect(page.locator("table.data-table tbody tr")).toContainText("a/first.bin");

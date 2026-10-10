@@ -859,3 +859,96 @@ async def _csrf_token(app: ASGIApp) -> str:
     token = response.headers.get(CSRF_HEADER.lower())
     assert token, "expected a CSRF token on an authenticated read"
     return token
+
+# ---------------------------------------------------------------------------
+# GET /admin/config — Configuration Visibility (admin-dashboard Requirement 6)
+# ---------------------------------------------------------------------------
+
+
+def _real_settings() -> Any:
+    """Build a real, validated :class:`~gateway.app.config.Settings`.
+
+    ``GET /admin/config`` iterates ``type(settings).model_fields``, so the config
+    tests need the genuine Pydantic model (not the hand-rolled ``_FakeSettings``
+    used elsewhere). Required env-only fields are supplied inline; everything else
+    takes its documented default.
+    """
+    from gateway.app.config import Settings
+
+    return Settings(
+        TGOS3_MASTER_KEY=_MASTER_KEY,
+        DATABASE_URL="postgresql+asyncpg://u:p@db/tgos3",
+    )
+
+
+def _config_app(settings: Any) -> FastAPI:
+    """Mount the admin router with a real ``Settings`` for the config endpoint."""
+    context = _FakeContext(
+        session_factory=cast(AsyncSessionFactory, _FakeSessionFactory(_State())),
+        staging=StagingReservation(16 * 1024 * 1024),
+        settings=settings,
+    )
+    app = FastAPI()
+    app.include_router(create_admin_router(context=cast(Any, context)))
+    return app
+
+
+async def test_config_lists_non_secret_env_settings_readonly(_admin_env: None) -> None:
+    """Non-secret Environment_Settings are returned as read-only name/value (6.2/6.4)."""
+    app = _config_app(_real_settings())
+    response = await _request(
+        app, "GET", "/admin/config", headers={"Authorization": _basic_auth()}
+    )
+    assert response.status == 200
+    body = response.json()
+    env = {entry["name"]: entry["value"] for entry in body["environment"]}
+
+    # A representative sample of the glossary's non-secret Environment_Settings.
+    assert env["S3_PORT"] == "9000"
+    assert env["ADMIN_PORT"] == "8080"
+    assert env["CHUNK_RECORDS"] == "512"
+    assert env["S3_REGION"] == "us-east-1"
+    # Booleans render as lower-case words for display.
+    assert env["CACHE_ENCRYPT"] == "false"
+
+    # The response is purely descriptive — there is no editing control to assert
+    # here (that is the Console's concern, Req 6.4) — but the five operator-
+    # editable Runtime_Settings must NOT appear on this read-only surface (6.1).
+    for runtime_field in (
+        "STAGING_MAX_SIZE",
+        "CACHE_MAX_SIZE",
+        "CACHE_HALF_LIFE",
+        "READ_AHEAD",
+        "UPLOAD_CONCURRENCY",
+    ):
+        assert runtime_field not in env
+
+
+async def test_config_reports_secrets_as_set_without_value(_admin_env: None) -> None:
+    """Secret Environment_Settings are set/not-set only, never their value (6.3/11.1)."""
+    settings = _real_settings()
+    app = _config_app(settings)
+    response = await _request(
+        app, "GET", "/admin/config", headers={"Authorization": _basic_auth()}
+    )
+    assert response.status == 200
+    body = response.json()
+
+    secrets_by_name = {entry["name"]: entry for entry in body["secrets"]}
+    assert set(secrets_by_name) == {"TGOS3_MASTER_KEY", "DATABASE_URL"}
+    for entry in secrets_by_name.values():
+        assert entry["is_set"] is True
+        # The secret must never be carried in the entry.
+        assert "value" not in entry
+
+    # The actual secret material appears nowhere in the serialized response, so
+    # neither the master key nor the database URL (with its credentials) leaks.
+    serialized = json.dumps(body)
+    assert _MASTER_KEY not in serialized
+    assert "postgresql+asyncpg://u:p@db/tgos3" not in serialized
+    assert ":p@" not in serialized
+
+    # The secrets are not duplicated into the non-secret environment list.
+    env_names = {entry["name"] for entry in body["environment"]}
+    assert "TGOS3_MASTER_KEY" not in env_names
+    assert "DATABASE_URL" not in env_names

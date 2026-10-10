@@ -16,7 +16,21 @@
  *   - `RecoveryStatus`— `src/api/recovery.ts`   (Requirement 19.4)
  *   - `SettingsValues`— `src/api/settings.ts`   (Requirements 19.5–19.7)
  */
-import type { Page, Route } from "@playwright/test";
+import { expect, type Page, type Route } from "@playwright/test";
+
+/**
+ * The CSRF token header the Admin API echoes on authenticated responses and
+ * expects back on unsafe requests (mirrors `CSRF_HEADER` in `src/api/client.ts`).
+ * The sign-in bootstrap `GET /admin/buckets` only succeeds in caching a token if
+ * its response carries this header, so every authenticated-path mock sets it.
+ */
+export const CSRF_HEADER = "X-CSRF-Token";
+
+/** A deterministic CSRF token value handed back on the bootstrap read. */
+export const SAMPLE_CSRF_TOKEN = "e2e-csrf-token";
+
+/** The admin password the auth helpers sign in with (any non-empty value works). */
+export const ADMIN_PASSWORD = "correct horse battery staple";
 
 /** One bucket row, matching the Admin API `BucketStats` model. */
 export interface BucketStats {
@@ -61,12 +75,28 @@ export interface SettingsValues {
 }
 
 /** Fulfil a route with a JSON body and status (default 200). */
-export async function fulfilJson(route: Route, body: unknown, status = 200): Promise<void> {
+export async function fulfilJson(
+  route: Route,
+  body: unknown,
+  status = 200,
+  headers?: Record<string, string>,
+): Promise<void> {
   await route.fulfill({
     status,
     contentType: "application/json",
     body: JSON.stringify(body),
+    ...(headers ? { headers } : {}),
   });
+}
+
+/**
+ * Fulfil the bootstrap `GET /admin/buckets` read with an `X-CSRF-Token` response
+ * header so the client caches the token exactly as the real backend would. Used
+ * both by {@link mockAdminApi} and by {@link signIn} so the authenticated path
+ * can issue unsafe (CSRF-bearing) requests afterwards.
+ */
+export async function fulfilBootstrap(route: Route, buckets: BucketStats[]): Promise<void> {
+  await fulfilJson(route, buckets, 200, { [CSRF_HEADER]: SAMPLE_CSRF_TOKEN });
 }
 
 /** A representative bucket list used by the navigation and bucket specs. */
@@ -155,7 +185,10 @@ export async function mockAdminApi(
   const jobs = overrides.jobs ?? SAMPLE_JOBS;
   const settings = overrides.settings ?? SAMPLE_SETTINGS;
 
-  await page.route("**/admin/buckets", (route) => fulfilJson(route, buckets));
+  // `GET /admin/buckets` doubles as the auth bootstrap read, so it must echo the
+  // CSRF token header for sign-in to cache it (Requirement 1.2). The real
+  // backend returns the header on every authenticated response.
+  await page.route("**/admin/buckets", (route) => fulfilBootstrap(route, buckets));
   await page.route("**/admin/objects*", (route) => fulfilJson(route, objectsPage));
   await page.route("**/admin/jobs", (route) => fulfilJson(route, jobs));
   await page.route("**/admin/settings", (route) => {
@@ -168,4 +201,94 @@ export async function mockAdminApi(
   await page.route("**/admin/recovery", (route) =>
     fulfilJson(route, overrides.recoveryStatus ?? null, overrides.recoveryStatusCode ?? 404),
   );
+}
+
+/**
+ * Mock `POST /admin/setup/status` — the probe `RequireSetup` runs on entry to a
+ * guarded admin route. `setup_required: false` lets authenticated navigation
+ * reach the admin screens; `true` diverts every guarded route into the wizard
+ * (design: "Setup-required routing"; Property 9).
+ */
+export async function mockSetupStatus(page: Page, setupRequired: boolean): Promise<void> {
+  await page.route("**/admin/setup/status", (route) =>
+    fulfilJson(route, { setup_required: setupRequired }),
+  );
+}
+
+/**
+ * Drive the login UI to an authenticated session, then land on the admin
+ * screens.
+ *
+ * The pre-existing screen specs navigate straight to a screen (e.g. `/settings`)
+ * which, under the auth/setup guards, now redirects to `/login`. This helper
+ * installs the setup-status mock (`setup_required: false` by default so the
+ * guards admit the admin screens), navigates to the destination (which bounces
+ * to `/login`), fills the single password field, and submits. On success the
+ * LoginScreen redirects to the admin area (landing on `/buckets`); the helper
+ * then performs a *client-side* sidebar navigation to the requested `to` screen
+ * so the in-memory session survives (a full `page.goto` after sign-in would
+ * drop the memory-only credentials and bounce back to `/login`).
+ *
+ * The caller must register its screen's own `page.route` handlers (and
+ * `mockAdminApi`, whose `GET /admin/buckets` serves the CSRF-bearing bootstrap)
+ * BEFORE calling this, since Playwright matches the most recently added route
+ * first.
+ */
+export async function signIn(
+  page: Page,
+  options: {
+    to?: string;
+    setupRequired?: boolean;
+    buckets?: BucketStats[];
+    /**
+     * Skip registering the bootstrap `GET /admin/buckets` route. Set this when
+     * the spec has already registered its own CSRF-bearing `/admin/buckets`
+     * handler (e.g. the Buckets screen specs, which assert on specific rows and
+     * need their payload to serve both bootstrap and the screen fetch).
+     */
+    skipBootstrapRoute?: boolean;
+  } = {},
+): Promise<void> {
+  const destination = options.to ?? "/buckets";
+  await mockSetupStatus(page, options.setupRequired ?? false);
+
+  // Install the bootstrap `GET /admin/buckets` with the CSRF header so sign-in
+  // caches the token, unless the spec already registered its own handler (which
+  // must then carry the CSRF header itself — see `fulfilBootstrap`).
+  if (!options.skipBootstrapRoute) {
+    await page.route("**/admin/buckets", (route) =>
+      fulfilBootstrap(route, options.buckets ?? SAMPLE_BUCKETS),
+    );
+  }
+
+  // Navigate to the destination; while unauthenticated the auth guard performs
+  // a *client-side* redirect to `/login` (same document).
+  await page.goto(destination);
+  await expect(page).toHaveURL(/\/login$/);
+
+  await page.locator("#login-password").fill(ADMIN_PASSWORD);
+  await page.getByRole("button", { name: "Sign in" }).click();
+
+  // On success the session flips to authenticated: the LoginScreen redirects off
+  // `/login`. With setup required the guards divert to the wizard — stop there.
+  await expect(page).not.toHaveURL(/\/login$/);
+  if (options.setupRequired === true) {
+    return;
+  }
+
+  // Otherwise we land on the admin area (`/buckets`). If a different screen was
+  // requested, reach it via the sidebar link (client-side nav preserves the
+  // in-memory session). The nav labels mirror `AppLayout`'s NAV_ITEMS.
+  const navLabelByPath: Record<string, string> = {
+    "/buckets": "Buckets",
+    "/objects": "Objects",
+    "/jobs": "Jobs",
+    "/recovery": "Recovery",
+    "/settings": "Settings",
+  };
+  const label = navLabelByPath[destination];
+  if (label !== undefined && destination !== "/buckets") {
+    await page.getByRole("link", { name: label }).click();
+    await expect(page).toHaveURL(new RegExp(`${destination}$`));
+  }
 }

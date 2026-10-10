@@ -10,11 +10,13 @@
  */
 import { expect, test } from "@playwright/test";
 
-import { SAMPLE_BUCKETS, fulfilJson, type BucketStats } from "./fixtures";
+import { SAMPLE_BUCKETS, fulfilBootstrap, fulfilJson, signIn, type BucketStats } from "./fixtures";
 
 test("renders a row per bucket with its stats", async ({ page }) => {
-  await page.route("**/admin/buckets", (route) => fulfilJson(route, SAMPLE_BUCKETS));
-  await page.goto("/buckets");
+  // The spec's own buckets handler carries the CSRF header (via fulfilBootstrap)
+  // so it serves both the sign-in bootstrap and the Buckets screen fetch.
+  await page.route("**/admin/buckets", (route) => fulfilBootstrap(route, SAMPLE_BUCKETS));
+  await signIn(page, { to: "/buckets", skipBootstrapRoute: true });
 
   const rows = page.locator("table.data-table tbody tr");
   await expect(rows).toHaveCount(SAMPLE_BUCKETS.length);
@@ -31,16 +33,27 @@ test("renders a row per bucket with its stats", async ({ page }) => {
 });
 
 test("empty bucket list shows the empty state", async ({ page }) => {
-  await page.route("**/admin/buckets", (route) => fulfilJson(route, []));
-  await page.goto("/buckets");
+  // An empty list still carries the CSRF header so sign-in bootstrap succeeds.
+  await page.route("**/admin/buckets", (route) => fulfilBootstrap(route, []));
+  await signIn(page, { to: "/buckets", skipBootstrapRoute: true });
 
   await expect(page.getByText("No buckets yet.")).toBeVisible();
   await expect(page.locator("table.data-table")).toHaveCount(0);
 });
 
 test("a failed load surfaces an error", async ({ page }) => {
-  await page.route("**/admin/buckets", (route) => fulfilJson(route, { detail: "boom" }, 500));
-  await page.goto("/buckets");
+  // The first GET is the sign-in bootstrap and must succeed (with the CSRF
+  // header); every subsequent GET — the Buckets screen's own fetch — fails with
+  // 500 so the screen surfaces its error state.
+  let bootstrapped = false;
+  await page.route("**/admin/buckets", (route) => {
+    if (!bootstrapped) {
+      bootstrapped = true;
+      return fulfilBootstrap(route, SAMPLE_BUCKETS);
+    }
+    return fulfilJson(route, { detail: "boom" }, 500);
+  });
+  await signIn(page, { to: "/buckets", skipBootstrapRoute: true });
 
   // The shared QueryClient retries a failed query a few times with backoff
   // before surfacing the error, so allow headroom beyond the default timeout.
@@ -50,29 +63,37 @@ test("a failed load surfaces an error", async ({ page }) => {
 });
 
 test("the list reflects a background refresh", async ({ page }) => {
-  // Serve one count on the first call, a larger count on every call after, so
-  // the next auto-refetch surfaces the new value.
-  let callCount = 0;
+  // The sign-in bootstrap consumes the first GET; the Buckets screen's own
+  // fetches follow. Serve 1,234 until the page reloads, then 2,000, so the
+  // reload surfaces the updated count. `screenCalls` counts only the screen's
+  // fetches (every GET after the bootstrap one).
+  let bootstrapped = false;
+  let screenCalls = 0;
   await page.route("**/admin/buckets", (route) => {
-    callCount += 1;
+    if (!bootstrapped) {
+      bootstrapped = true;
+      return fulfilBootstrap(route, SAMPLE_BUCKETS);
+    }
+    screenCalls += 1;
     const stored: BucketStats[] = [
       {
         name: "photos",
-        object_count: callCount === 1 ? 1234 : 2000,
+        object_count: screenCalls === 1 ? 1234 : 2000,
         stored_bytes: 5_368_709_120,
         pending_write_count: 0,
       },
     ];
-    return fulfilJson(route, stored);
+    return fulfilBootstrap(route, stored);
   });
 
-  await page.goto("/buckets");
+  await signIn(page, { to: "/buckets", skipBootstrapRoute: true });
   const photosRow = page.locator("table.data-table tbody tr").filter({ hasText: "photos" });
   await expect(photosRow).toContainText("1,234");
 
-  // Trigger a refetch deterministically by re-focusing the tab is not enough
-  // (refetchOnWindowFocus is off); instead reload, which the mock answers with
-  // the updated count on its second call.
-  await page.reload();
-  await expect(photosRow).toContainText("2,000");
+  // A full page reload would drop the in-memory session (auth lives only in
+  // React memory now) and bounce back to /login, so prove the auto-refresh
+  // through the hook's own poll instead: `useBuckets` refetches on a 15 s
+  // interval, and the mock answers the next poll with the updated count. Allow
+  // headroom past the interval.
+  await expect(photosRow).toContainText("2,000", { timeout: 20_000 });
 });

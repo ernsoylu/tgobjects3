@@ -74,6 +74,7 @@ import uuid
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from fastapi import FastAPI, Response
 from sqlalchemy import select
@@ -111,6 +112,9 @@ from gateway.app.storage import staging as staging_mod
 from gateway.app.storage.staging import StagingReservation
 from gateway.app.telegram.port import SessionState, TelegramMessage
 from gateway.app.telegram.session import ManagedTelegramClient, SessionManager
+
+if TYPE_CHECKING:
+    from gateway.app.admin.setup import TelegramLoginPort
 
 logger = logging.getLogger(__name__)
 
@@ -758,13 +762,21 @@ def _wire_admin_router(app: FastAPI, context: GatewayContext) -> None:
 
 
 def _build_setup_router(context: GatewayContext) -> object | None:
-    """Build the setup wizard router if the module is present (task 42.1).
+    """Build the setup wizard router if the module is present (tasks 42.1, 2.1).
 
     Imported defensively and returns ``None`` when unavailable so the admin
-    router still mounts its core endpoints. No ``login_factory`` is supplied yet
-    — the Telethon-backed interactive-login adapter is a later wiring step — so
-    the Telegram login step reports HTTP 503 until it is injected, which is the
-    correct state for a deployment that has not yet configured Telegram.
+    router still mounts its core endpoints. The wizard is handed a
+    ``login_factory`` that builds the Telethon-backed interactive-login adapter
+    (:class:`gateway.app.telegram.login_adapter.TelethonLoginAdapter`) so that
+    ``POST /admin/setup/telegram`` reaches the adapter and drives a live Telegram
+    login instead of returning HTTP 503 (Requirements 2.1, 2.2).
+
+    The Telethon import is deferred *inside* the ``login_factory`` closure so
+    this module — the composition root every deployment imports — stays
+    importable on a host without Telethon installed; Telethon is only touched
+    once an operator actually begins Telegram login. ``gateway/app/telegram`` is
+    already a listed package, so adding the ``login_adapter`` *module* needs no
+    change to ``[tool.setuptools].packages`` in ``pyproject.toml``.
     """
     import importlib
 
@@ -778,7 +790,15 @@ def _build_setup_router(context: GatewayContext) -> object | None:
     if create_setup_router is None:
         logger.info("setup module present but exposes no create_setup_router")
         return None
-    router: object = create_setup_router(context=context)
+
+    def login_factory(settings: Settings) -> TelegramLoginPort:
+        from gateway.app.telegram.login_adapter import TelethonLoginAdapter
+
+        return TelethonLoginAdapter(settings)
+
+    router: object = create_setup_router(
+        context=context, login_factory=login_factory
+    )
     return router
 
 

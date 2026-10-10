@@ -10,11 +10,11 @@
  */
 import { expect, test } from "@playwright/test";
 
-import { SAMPLE_SETTINGS, fulfilJson } from "./fixtures";
+import { SAMPLE_SETTINGS, fulfilJson, signIn } from "./fixtures";
 
 test("loads the current settings into the form", async ({ page }) => {
   await page.route("**/admin/settings", (route) => fulfilJson(route, SAMPLE_SETTINGS));
-  await page.goto("/settings");
+  await signIn(page, { to: "/settings" });
 
   await expect(page.locator("#settings-staging_max_size")).toHaveValue(
     String(SAMPLE_SETTINGS.staging_max_size),
@@ -31,7 +31,7 @@ test("saving a valid change shows a success toast", async ({ page }) => {
     }
     return fulfilJson(route, SAMPLE_SETTINGS);
   });
-  await page.goto("/settings");
+  await signIn(page, { to: "/settings" });
 
   await page.locator("#settings-upload_concurrency").fill("6");
   await page.getByRole("button", { name: "Save changes" }).click();
@@ -43,7 +43,7 @@ test("saving a valid change shows a success toast", async ({ page }) => {
 
 test("an out-of-range field blocks submission", async ({ page }) => {
   await page.route("**/admin/settings", (route) => fulfilJson(route, SAMPLE_SETTINGS));
-  await page.goto("/settings");
+  await signIn(page, { to: "/settings" });
 
   // read_ahead max is 32; 99 is rejected client-side.
   await page.locator("#settings-read_ahead").fill("99");
@@ -59,13 +59,15 @@ test("a 409 staging reduction below reserved surfaces as an error toast", async 
     }
     return fulfilJson(route, SAMPLE_SETTINGS);
   });
-  await page.goto("/settings");
+  await signIn(page, { to: "/settings" });
 
   // Any valid change enables Save; the backend then rejects it with 409.
   await page.locator("#settings-staging_max_size").fill("1024");
   await page.getByRole("button", { name: "Save changes" }).click();
 
-  await expect(page.locator(".toast-title")).toContainText("Save failed");
+  // A 409 (staging below reserved) is a cross-field rejection: the Settings
+  // panel titles it "Save rejected" and surfaces the backend detail.
+  await expect(page.locator(".toast-title")).toContainText("Save rejected");
   await expect(page.locator(".toast-description")).toContainText(
     "staging_max_size below reserved bytes",
   );

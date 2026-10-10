@@ -10,7 +10,7 @@
  */
 import { expect, test } from "@playwright/test";
 
-import { fulfilJson, type JobEntry } from "./fixtures";
+import { fulfilJson, signIn, type JobEntry } from "./fixtures";
 
 const COMMITTED_JOB: JobEntry = {
   id: "job-committed-1",
@@ -30,7 +30,7 @@ const FAILED_JOB: JobEntry = {
 
 test("lists jobs and offers Retry only for FAILED jobs", async ({ page }) => {
   await page.route("**/admin/jobs", (route) => fulfilJson(route, [COMMITTED_JOB, FAILED_JOB]));
-  await page.goto("/jobs");
+  await signIn(page, { to: "/jobs" });
 
   const rows = page.locator("table.data-table tbody tr");
   await expect(rows).toHaveCount(2);
@@ -58,7 +58,7 @@ test("retrying a FAILED job transitions it back to STAGED", async ({ page }) => 
     return fulfilJson(route, { ...FAILED_JOB, state: "STAGED" });
   });
 
-  await page.goto("/jobs");
+  await signIn(page, { to: "/jobs" });
   const row = page.locator("table.data-table tbody tr");
   await expect(row).toContainText("FAILED");
 
@@ -78,7 +78,7 @@ test("a rejected retry surfaces the backend error", async ({ page }) => {
     fulfilJson(route, { detail: "job is not in FAILED state" }, 409),
   );
 
-  await page.goto("/jobs");
+  await signIn(page, { to: "/jobs" });
   await page.locator("table.data-table tbody tr").getByRole("button", { name: "Retry" }).click();
 
   await expect(page.locator(".toast-title")).toContainText("Retry failed");
