@@ -1,0 +1,149 @@
+name: CI
+
+# Full build-check and test pipeline for the tgobjects3 gateway (Python) and
+# the admin console SPA (TypeScript/React). Runs on every push and pull request
+# targeting main. Jobs are split by concern so a failure points directly at the
+# stage that broke: Python lint, Python type-check, Python unit tests, Python
+# integration tests (real PostgreSQL via testcontainers), and the console's
+# lint / type-check / unit tests / production build / Playwright e2e suite.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel superseded runs on the same ref to save CI minutes.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.12"
+  NODE_VERSION: "20"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Python gateway + CLI
+  # ---------------------------------------------------------------------------
+  python-lint:
+    name: Python lint (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install
+        run: pip install -e ".[dev,test]"
+      - name: ruff check
+        run: ruff check .
+
+  python-typecheck:
+    name: Python typecheck (mypy strict)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install
+        run: pip install -e ".[dev,test]"
+      - name: mypy
+        run: mypy
+
+  python-unit:
+    name: Python unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install
+        run: pip install -e ".[dev,test]"
+      - name: pytest tests/unit
+        run: pytest tests/unit
+
+  python-integration:
+    name: Python integration tests
+    runs-on: ubuntu-latest
+    # Integration tests spin up a real PostgreSQL via testcontainers, which
+    # uses the Docker daemon preinstalled on GitHub-hosted ubuntu runners.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install
+        run: pip install -e ".[dev,test]"
+      - name: pytest tests/integration
+        run: pytest tests/integration
+
+  # ---------------------------------------------------------------------------
+  # Admin console SPA
+  # ---------------------------------------------------------------------------
+  console-check:
+    name: Console lint, typecheck, unit tests & build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: console
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: console/package-lock.json
+      - name: Install
+        run: npm ci
+      - name: Lint (eslint + prettier)
+        run: npm run lint
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Unit tests (vitest)
+        run: npm run test
+      - name: Build
+        run: npm run build
+
+  console-e2e:
+    name: Console e2e (Playwright)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: console
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: console/package-lock.json
+      - name: Install
+        run: npm ci
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+      - name: Run e2e tests
+        # playwright.config.ts builds the bundle and serves it with vite preview
+        # via its webServer block; the Admin API is mocked at the network layer.
+        run: npm run test:e2e
+      - name: Upload Playwright report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: console/playwright-report
+          retention-days: 7
+          if-no-files-found: ignore

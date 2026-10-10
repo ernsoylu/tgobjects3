@@ -1,6 +1,12 @@
 # Keep the Docker build context minimal and reproducible.
-# The deploy/Dockerfile only COPYs pyproject.toml, README.md, gateway/ and cli/,
-# but excluding the rest keeps the context small and avoids leaking local state.
+#
+# Both images build from the repository root (see deploy/docker-compose.yml):
+#   - deploy/Dockerfile          COPYs pyproject.toml, README.md, gateway/, cli/
+#   - deploy/Dockerfile.console  COPYs console/ and deploy/nginx.console.conf
+#
+# So this file must NOT exclude console/ or deploy/ wholesale (that broke the
+# console image build). Instead it trims only heavy/local artifacts within them
+# while letting source and the nginx config through.
 
 # Version control
 .git
@@ -23,22 +29,33 @@ env/
 .mypy_cache/
 .pytest_cache/
 .ruff_cache/
+.hypothesis/
 .coverage
 htmlcov/
 
 # Tests are not needed in the image
 tests/
 
-# Stub / non-service trees
-console/
-deploy/
-
-# Specs and docs
+# Specs and docs (keep README.md for the gateway image)
 .kiro/
 *.md
 !README.md
 
-# Local env files — never bake secrets into the build context
+# --- Console: keep source + package manifests, drop local/build artifacts ---
+# `npm ci` inside the image regenerates node_modules; the bundle is built in the
+# image, so a local dist/ must not leak in. e2e artifacts are irrelevant.
+console/node_modules/
+console/dist/
+console/test-results/
+console/playwright-report/
+
+# --- Deploy: only nginx.console.conf is needed by the console image ---------
+# Exclude the local env file (secrets) but keep .env.example and the configs.
+deploy/.env
+deploy/.env.*
+!deploy/.env.example
+
+# Local env files anywhere — never bake secrets into the build context
 .env
 .env.*
 !.env.example
